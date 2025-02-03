@@ -1,13 +1,9 @@
 from typing import List
-import aiohttp
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from dotenv import load_dotenv
 from starlette.websockets import WebSocketState
 import json
 import asyncio
-import os
-import websockets
-import ssl
 
 from assistant import assistant
 from firebase.firebase_connection import FirebaseConnection
@@ -23,7 +19,6 @@ managers = {}
 class ConnectionManager:
     def __init__(self, meeting_id):
         self.active_connections: List[WebSocket] = []
-        self.transcript = []
         self.meeting_id = meeting_id
         self.tags = [tag["name"] for tag in firebase.get_tags(meeting_id)]
 
@@ -35,10 +30,10 @@ class ConnectionManager:
         await websocket.accept()
         self.active_connections.append(websocket)
 
-    def disconnect(self, websocket: WebSocket):
+    async def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-            self.broadcast(json.dumps({"user_id": self.authenticated_ids[self.authenticated_sockets.index(websocket)], "message": "left"}).encode(), sender=None)
+            await self.broadcast(json.dumps({"user_id": self.authenticated_ids[self.authenticated_sockets.index(websocket)], "message": "left"}).encode(), sender=None)
 
             print("disconnected")
             print(len(self.active_connections))
@@ -66,127 +61,77 @@ class ConnectionManager:
                 del self
     def is_authed(self, websocket: WebSocket):
         return websocket in self.authenticated_sockets
-
-    async def send_all(self, data: object):
-        self.transcript.append(data)
-        await asyncio.gather(
-            *[connection.send_json(data) for connection in self.authenticated_sockets if connection.client_state == WebSocketState.CONNECTED]
-        )
-        print("sent", json.dumps(data, indent=4))
-
+    
     async def broadcast(self, data: bytes, sender: WebSocket):
         for connection in self.authenticated_sockets:
             if connection != sender and connection.client_state == WebSocketState.CONNECTED:
                 try:
+                    print("Sending audio bytes...")
                     await connection.send_bytes(data)
-                except Exception:
+                except Exception as e:
+                    print("Exception broadcasting audio bytes: ", e)
                     pass  # Suppress errors during broadcasting
 
-async def text_to_speech(text: str, manager: ConnectionManager):
-    """Convert text to speech using the Deepgram TTS API."""
-    print("connecting to tts")
+    async def authenticate_user(self, websocket: WebSocket):
+        try :
+            if not self.is_authed(websocket):
+                credentials = await websocket.receive_json()
+                print("credentials: ", credentials)
+
+                if not str(credentials["user_id"]) in self.user_ids:
+                    print("Error! Connection Not Authorized, Closing Web Socket.")
+                    await websocket.send_json({"error": "Unauthorized"})
+                    await websocket.close()
+                    return False
+
+                user_id = credentials["user_id"]
+                print("Successfully authenticated user ", user_id)
+                self.authenticated_sockets.append(websocket)
+                self.authenticated_ids.append(credentials["user_id"])
+                await websocket.send_json({"auth": "success"})
+            return user_id
+        except Exception as e:
+            print("Exception authorizing user: ", e)
+            return
+
+@router.websocket("/ws/meeting/{meeting_id}/audio")
+async def audio_endpoint(websocket: WebSocket, meeting_id: str):
     try:
-        ssl_context = ssl.SSLContext()
-        ssl_context.verify_mode = ssl.CERT_NONE
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                'https://api.deepgram.com/v1/speak?model=aura-asteria-en',
-                headers={
-                    'Authorization': f'Token {os.getenv("DEEPGRAM_API_KEY")}',
-                    'Content-Type': 'application/json'
-                },
-                json={"text": text},
-                ssl=ssl_context
-            ) as response:
-                if response.status == 200:
-                    audio_data = await response.read()
-                    await manager.broadcast(audio_data, sender=None)
-                else:
-                    print(f"Error: {response.status}")
-    except Exception as e:
-        print(e)
-    
+        manager_key = f"audio_{meeting_id}"
+        if manager_key not in managers:
+            managers[manager_key] = ConnectionManager(meeting_id)
 
-async def deepgram_transcribe(deepgram_socket: websockets.WebSocketClientProtocol, manager: ConnectionManager, data):
-    """Receive transcriptions from Deepgram and send to the client WebSocket."""
-    try:
-        await deepgram_socket.send(data)
-        response = await deepgram_socket.recv()
-        response_data = json.loads(response)
+        manager: ConnectionManager = managers[manager_key]
+        await manager.connect(websocket)
 
-        transcript = response_data["channel"]["alternatives"][0]['transcript']
-
-        if transcript == '': return
-
-        print(transcript)
-        await manager.send_all(response_data)
-        if WAKE_WORD.lower() in transcript.lower().replace(".", "").replace(",", "").replace("!", "").replace("?", "").replace(":", "").replace(";", "").replace("-", "").replace("'", "").replace("\"", "").replace("(", "").replace(")", "").replace("[", "").replace("]", "").replace("{", "").replace("}", "").replace("/", "").replace("\\", "").replace("|", "").replace("@", "").replace("#", "").replace("$", "").replace("%", "").replace("^", "").replace("&", "").replace("*", "").replace("_", "").replace("+", "").replace("=", "").replace("<", "").replace(">", "").replace("`", "").replace("~", "").replace("", ""):
-            print("WAKE WORD DETECTED")
-            transcript_text = "".join([data["channel"]["alternatives"][0]['transcript'] for data in manager.transcript])
-            assistant_response = assistant.use_assistant(transcript_text)
-            
-            await manager.send_all({
-                "assistant_response": assistant_response
-            })
-
-            await text_to_speech(assistant_response, manager)
-            
-
-    except Exception:
-        pass  # Suppress any errors to avoid printing task errors
-
-@router.websocket("/ws/meeting/{meeting_id}")
-async def websocket_endpoint(websocket: WebSocket, meeting_id: str):
-    print(meeting_id)
-
-    if meeting_id not in managers:
-        managers[meeting_id] = ConnectionManager(meeting_id)
-
-    manager = managers[meeting_id]
-
-    """WebSocket endpoint for receiving audio data and sending it to Deepgram."""
-    await manager.connect(websocket)
-    
-    # Create SSL context to ignore certificate verification (not recommended for production)
-    ssl_context = ssl.SSLContext()
-    ssl_context.verify_mode = ssl.CERT_NONE
-
-    deepgram_socket = await websockets.connect(
-        'wss://api.deepgram.com/v1/listen?smart_format=true',
-        extra_headers={
-            'Authorization': f'Token {os.getenv("DEEPGRAM_API_KEY")}'
-        },
-        ssl=ssl_context
-    )
-
-    try:
-        if not manager.is_authed(websocket):
-            credentials = await websocket.receive_json()
-
-            print(credentials)
-
-            if not str(credentials["user_id"]) in manager.user_ids:
-                await websocket.send_json({"error": "Unauthorized"})
-                await websocket.close()
-                return
-            
-            manager.authenticated_sockets.append(websocket)
-            manager.authenticated_ids.append(credentials["user_id"])
-            await websocket.send_json({"auth": "success"})
-            manager.broadcast(json.dumps({"user_id": credentials["user_id"], "message": "joined"}).encode(), sender=websocket)
-
+        # Authenticate the connection if possible
+        user_id = await manager.authenticate_user(websocket)
+        print("[AUTH] User ID: ", user_id)
+        if not user_id:
+            print("Could not authenticate the user.")
+            manager.disconnect(websocket)
+            return
+        
+        # Receieve and broadcast the meeting audio
         while True:
-            # Receive audio data from the client WebSocket
-            data = await websocket.receive_bytes()
+            try:
+                data = await websocket.receive_bytes()
+                print("Audio data received: ", len(data))
 
-            # Run the transcription task without printing any errors
-            asyncio.create_task(deepgram_transcribe(deepgram_socket, manager, data))
-
-            # Broadcast the data to other clients
-            await manager.broadcast(data, sender=websocket)
+                print("Broadcasting audio data...")
+                await manager.broadcast(data, sender=websocket)
+            except asyncio.QueueFull:
+                print("Queue full, skipping...")
+                pass
+            except asyncio.CancelledError:
+                print("Cancelled")
+                pass
+            except Exception as e:
+                print("Error receiving audio data: ", e)
+                manager.disconnect(websocket)
+                break
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
-        await deepgram_socket.close()
+        await manager.disconnect(websocket)
     except Exception as e:
-        print("Exception occurred:", traceback.format_exc())
-        pass  # Suppress other exceptions to avoid unwanted prints
+        print("Error connecting to the audio web socket: ", e)
+        traceback.print_exc()

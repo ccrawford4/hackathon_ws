@@ -1,7 +1,6 @@
 import pyrebase
 import os
 from dotenv import load_dotenv
-import json
 
 class FirebaseConnection:
     def __init__(self):

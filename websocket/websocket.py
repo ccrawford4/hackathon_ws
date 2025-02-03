@@ -128,7 +128,8 @@ async def audio_endpoint(websocket: WebSocket, meeting_id: str):
                 pass
             except Exception as e:
                 print("Error receiving audio data: ", e)
-                pass
+                manager.disconnect(websocket)
+                break
     except WebSocketDisconnect:
         await manager.disconnect(websocket)
     except Exception as e:

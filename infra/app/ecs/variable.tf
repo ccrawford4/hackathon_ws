@@ -22,3 +22,35 @@ variable "private_subnet_ids" {
   description = "IDs of private subnets where the ECS service will be deployed to."
   type        = list(string)
 }
+# variable "firebase_api_key" {
+#   description = "Firebase API key."
+#   type        = string
+# }
+# variable "firebase_auth_domain" {
+#   description = "Firebase auth domain."
+#   type        = string
+# }
+# variable "firebase_database_url" {
+#   description = "Firebase database URL."
+#   type        = string
+# }
+# variable "firebase_project_id" {
+#   description = "Firebase project ID."
+#   type        = string
+# }
+# variable "firebase_storage_bucket" {
+#   description = "Firebase storage bucket."
+#   type        = string
+# }
+# variable "firebase_messaging_sender_id" {
+#   description = "Firebase messaging sender ID."
+#   type        = string
+# }
+# variable "firebase_app_id" {
+#   description = "Firebase app ID."
+#   type        = string
+# }
+# variable "firebase_measurement_id" {
+#   description = "Firebase measurement ID."
+#   type        = string
+# }

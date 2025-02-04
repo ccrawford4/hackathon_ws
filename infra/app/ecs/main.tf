@@ -136,40 +136,40 @@ resource "aws_ecs_task_definition" "api" {
           awslogs-region        = var.region
         }
       },
-      # environment = [
-      #   {
-      #     name = "FIREBASE_API_KEY"
-      #     value = var.firebase_api_key
-      #   },
-      #   {
-      #     name = "FIREBASE_AUTH_DOMAIN",
-      #     value = var.firebase_auth_domain
-      #   },
-      #   {
-      #     name = "FIREBASE_DATABASE_URL",
-      #     value = var.firebase_database_url
-      #   },
-      #   {
-      #     name = "FIREBASE_PROJECT_ID",
-      #     value = var.firebase_project_id
-      #   },
-      #   {
-      #     name = "FIREBASE_STORAGE_BUCKET",
-      #     value = var.firebase_storage_bucket
-      #   },
-      #   {
-      #     name = "FIREBASE_MESSAGING_SENDER_ID",
-      #     value = var.firebase_messaging_sender_id
-      #   },
-      #   {
-      #     name = "FIREBASE_APP_ID",
-      #     value = var.firebase_app_id
-      #   },
-      #   {
-      #     name = "FIREBASE_MEASUREMENT_ID",
-      #     value = var.firebase_measurement_id
-      #   }
-      # ]
+      environment = [
+        {
+          name = "FIREBASE_API_KEY"
+          value = var.firebase_api_key
+        },
+        {
+          name = "FIREBASE_AUTH_DOMAIN",
+          value = var.firebase_auth_domain
+        },
+        {
+          name = "FIREBASE_DATABASE_URL",
+          value = var.firebase_database_url
+        },
+        {
+          name = "FIREBASE_PROJECT_ID",
+          value = var.firebase_project_id
+        },
+        {
+          name = "FIREBASE_STORAGE_BUCKET",
+          value = var.firebase_storage_bucket
+        },
+        {
+          name = "FIREBASE_MESSAGING_SENDER_ID",
+          value = var.firebase_messaging_sender_id
+        },
+        {
+          name = "FIREBASE_APP_ID",
+          value = var.firebase_app_id
+        },
+        {
+          name = "FIREBASE_MEASUREMENT_ID",
+          value = var.firebase_measurement_id
+        }
+      ]
     }
   ])
 }

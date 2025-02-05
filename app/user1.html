@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Audio Recorder</title>
+  </head>
+  <body>
+    <button id="testBtn">Play Test Sound</button>
+    <h1>Audio Recorder</h1>
+    <button id="recordButton">Record</button>
+    <button id="stopButton" disabled>Stop</button>
+    <div id="status">Audio Context Status: Unknown</div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
+
+    <script>
+      try {
+        // A short beep sound in Base64 WAV format
+        const beepBase64 =
+          "UklGRmQAAABXQVZFZm10IBAAAAABAAEAwAABAAACABAASGFkIDE2IQAAZGF0YQAA";
+
+        document.getElementById("testBtn").onclick = async () => {
+          console.log("butotn clicked!");
+
+          const kSampleRate = 44100; // Other sample rates might not work depending on the your browser's AudioContext
+          const kNumSamples = 16834;
+          const kFrequency = 440;
+          const kPI_2 = Math.PI * 2;
+
+          function play_buffersource() {
+            if (!window.AudioContext) {
+              if (!window.webkitAudioContext) {
+                alert(
+                  "Your browser sucks because it does NOT support any AudioContext!"
+                );
+                return;
+              }
+              window.AudioContext = window.webkitAudioContext;
+            } else {
+              console.log("Audio context found");
+            }
+
+            var ctx = new AudioContext();
+
+            var buffer = ctx.createBuffer(1, kNumSamples, kSampleRate);
+            var buf = buffer.getChannelData(0);
+            for (i = 0; i < kNumSamples; ++i) {
+              buf[i] = Math.sin((kFrequency * kPI_2 * i) / kSampleRate);
+            }
+
+            node = ctx.createBufferSource(0);
+            node.buffer = buffer;
+            node.connect(ctx.destination);
+
+            node.start(0);
+          }
+
+          play_buffersource();
+        };
+      } catch (error) {
+        console.error("Error:", error);
+      }
+    </script>
+
+    <script>
+      const kSampleRate = 44100;
+      const kNumSamples = 16834;
+      const ctx = new AudioContext();
+
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const statusDiv = document.getElementById("status");
+
+      // Update status display
+      const updateStatus = () => {
+        statusDiv.textContent = `Audio Context Status: ${audioCtx.state}`;
+      };
+
+      // Resume audio context on user interaction
+      const resumeAudioContext = async () => {
+        try {
+          if (audioCtx.state === "suspended") {
+            await audioCtx.resume();
+            console.log("AudioContext resumed successfully");
+          }
+          updateStatus();
+        } catch (error) {
+          console.error("Failed to resume AudioContext:", error);
+        }
+      };
+
+      // Initial status check
+      updateStatus();
+
+      console.log("AudioContext state:", audioCtx.state);
+      const recordButton = document.getElementById("recordButton");
+      const stopButton = document.getElementById("stopButton");
+      const socket = new WebSocket(
+        "ws://localhost:8000/ws/meeting/10adf8d0-9402-49f0-a2db-a63a84ae84eb/audio"
+      );
+
+      let mediaStream = null;
+      let audioContext = null;
+      let sourceNode = null;
+      let processorNode = null;
+      let authed = false;
+
+      recordButton.addEventListener("click", async () => {
+        await resumeAudioContext();
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
+        audioContext = new AudioContext();
+
+        // Set up microphone input
+        sourceNode = audioContext.createMediaStreamSource(mediaStream);
+        processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+
+        // Send audio data to the server
+        processorNode.onaudioprocess = (event) => {
+          const inputBuffer = event.inputBuffer;
+          const channelData = inputBuffer.getChannelData(0);
+          const audioBlob = new Blob([channelData], {
+            type: "application/octet-stream",
+          });
+          audioBlob.arrayBuffer().then((buffer) => socket.send(buffer));
+        };
+
+        sourceNode.connect(processorNode);
+        processorNode.connect(audioContext.destination);
+      });
+
+      socket.onopen = () => {
+        console.log("WebSocket connection opened");
+        socket.send(
+          JSON.stringify({ user_id: "48c0d337-19c5-4199-a399-b5ba85484d3c" })
+        );
+      };
+
+      socket.onclose = () => {
+        console.log("WebSocket connection closed");
+      };
+
+      socket.onerror = (error) => {
+        console.error("WebSocket error:", error);
+      };
+
+      socket.onmessage = async (event) => {
+        socket.binaryType = "arraybuffer";  // Add this line
+        console.log("WebSocket message:", event.data);
+
+        if (event.data instanceof ArrayBuffer) {
+          const audioData = new Float32Array(event.data);
+
+          const buffer = ctx.createBuffer(1, audioData.length, kSampleRate);
+          const buf = buffer.getChannelData(0);
+
+          buf.set(audioData);
+
+          const node = ctx.createBufferSource();
+          node.buffer = buffer;
+          node.connect(ctx.destination);
+          node.start(0);
+
+        } else {
+          console.log("Message is not an array buffer!");
+        }
+      };
+
+      stopButton.addEventListener("click", () => {
+        if (mediaStream) {
+          mediaStream.getTracks().forEach((track) => track.stop());
+        }
+        if (audioContext) {
+          audioContext.close();
+        }
+        socket.close();
+        recordButton.disabled = false;
+        stopButton.disabled = true;
+      });
+    </script>
+  </body>
+</html>

@@ -10,4 +10,4 @@ ssl_context = ssl._create_unverified_context()
 
 @app.get("/")
 def read_root():
-    return {"Hello": "World"}
+    return {"Hello": "World", "message": "This is the root of the websocket server"}
